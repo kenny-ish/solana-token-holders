@@ -5,6 +5,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import defaultdict
+from decimal import Decimal
 
 
 def rpc(url, method, params, retries=4):
@@ -25,14 +26,22 @@ def rpc(url, method, params, retries=4):
     return resp["result"]
 
 
+def _ui_amount(account):
+    value = account.get("uiAmountString")
+    if value is not None:
+        return Decimal(value)
+    value = account.get("uiAmount")
+    return Decimal(str(value)) if value is not None else Decimal(0)
+
+
 def group_by_owner(largest, parsed_accounts):
     """Sum token amounts by owner. `largest` items: {address, uiAmount}; parsed accounts align with them."""
-    owners = defaultdict(float)
+    owners = defaultdict(Decimal)
     for acc, info in zip(largest, parsed_accounts):
         owner = "unknown"
         if info and isinstance(info.get("data"), dict):
             owner = info["data"]["parsed"]["info"].get("owner", "unknown")
-        owners[owner] += acc.get("uiAmount") or 0.0
+        owners[owner] += _ui_amount(acc)
     return sorted(owners.items(), key=lambda kv: -kv[1])
 
 
@@ -43,7 +52,7 @@ def main():
     a = ap.parse_args()
 
     supply = rpc(a.rpc, "getTokenSupply", [a.mint])["value"]
-    total = float(supply["uiAmountString"])
+    total = Decimal(supply["uiAmountString"])
     try:
         largest = rpc(a.rpc, "getTokenLargestAccounts", [a.mint])["value"]
     except RuntimeError as e:
@@ -56,7 +65,7 @@ def main():
     grouped = group_by_owner(largest, infos)
     for owner, amount in grouped:
         print(f"{owner:<46}{amount:>22,.2f}{amount / total:>9.2%}")
-    top = sum(x.get("uiAmount") or 0 for x in largest)
+    top = sum((_ui_amount(x) for x in largest), Decimal(0))
     print(f"\ntop {len(largest)} token accounts ({len(grouped)} owners) hold {top / total:.1%} of supply")
 
 
